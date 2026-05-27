@@ -1,4 +1,4 @@
-# 对抗样本图像实验室
+# MNIST 对抗样本攻击与鲁棒性评估
 
 本项目用于训练一个简单的 MNIST 卷积神经网络，并使用 FGSM 和 PGD 两种方法生成对抗样本，观察模型在干净样本和对抗样本上的准确率变化。
 
@@ -177,7 +177,7 @@ eval/metrics.py
 - `robust_acc`：对抗样本上的准确率。
 - `attack_success_rate`：攻击成功率，当前代码中计算方式为 `1 - robust_acc`。
 
-示例实验结果格式：
+示例结果格式：
 
 | Model | Attack | Epsilon | Alpha | Steps | Clean Acc | Robust Acc | Attack Success Rate |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -243,7 +243,7 @@ simple_cnn_mnist.pth
 python evaluate_attack.py --attack none --model-path simple_cnn_mnist.pth
 ```
 
-你应该能看到类似输出：
+应该能看到类似输出：
 
 ```text
 Model: SimpleCNN
@@ -275,7 +275,7 @@ python evaluate_attack.py --attack pgd --epsilon 0.3 --alpha 0.01 --steps 40 --m
 python evaluate_attack.py --attack pgd --epsilon 0.3 --alpha 0.01 --steps 40 --model-path simple_cnn_mnist.pth --visualize
 ```
 
-## 建议实验顺序
+## 建议顺序
 
 先训练模型：
 
