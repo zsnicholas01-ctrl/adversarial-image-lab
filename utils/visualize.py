@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 
 
-def show_adversarial_example(original_image, adv_image, save_path=None):
+def show_adversarial_example(original_image, adv_image, save_path=None, show=True):
     """Show original image, amplified perturbation, and adversarial image."""
     original_image = original_image.detach().cpu()
     adv_image = adv_image.detach().cpu()
@@ -34,4 +34,7 @@ def show_adversarial_example(original_image, adv_image, save_path=None):
     if save_path is not None:
         plt.savefig(save_path, dpi=150)
 
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)

@@ -1,312 +1,220 @@
 # MNIST 对抗样本攻击与鲁棒性评估
 
-本项目用于训练一个简单的 MNIST 卷积神经网络，并使用 FGSM 和 PGD 两种方法生成对抗样本，观察模型在干净样本和对抗样本上的准确率变化。
+本项目基于 PyTorch 构建 MNIST 手写数字分类模型，并实现 FGSM 与 PGD 两种典型对抗攻击方法。项目包含模型训练、攻击生成、鲁棒性评估和对抗样本可视化，可用于理解图像分类模型在扰动输入下的性能变化。
+
+## 项目亮点
+
+- 使用 `SimpleCNN` 完成 MNIST 手写数字分类。
+- 实现 FGSM 一步梯度符号攻击。
+- 实现 PGD 多步迭代投影攻击。
+- 支持 Clean Acc、Robust Acc、Attack Success Rate 三类指标评估。
+- 提供对抗样本可视化，展示原图、扰动和攻击后图片。
+- README 记录真实运行结果，未手工伪造指标。
 
 ## 项目结构
 
 ```text
 adversarial_image_lab/
-|-- models/
-|   `-- simple_cnn.py
 |-- attacks/
 |   |-- fgsm.py
 |   `-- pgd.py
 |-- eval/
 |   `-- metrics.py
+|-- models/
+|   `-- simple_cnn.py
+|-- results/
+|   |-- fgsm_eps_0.3_example.png
+|   `-- pgd_eps_0.3_example.png
 |-- utils/
 |   `-- visualize.py
-|-- train.py
 |-- evaluate_attack.py
+|-- requirements.txt
+|-- train.py
+|-- visualize_attack.py
 `-- README.md
+```
+
+## 环境依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+`requirements.txt` 包含：
+
+```text
+torch
+torchvision
+matplotlib
+pillow
+numpy
 ```
 
 ## SimpleCNN 模型
 
-模型文件位于：
+模型文件位于 `models/simple_cnn.py`。输入为 MNIST 单通道灰度图，尺寸为 `28 x 28`。
+
+Shape 变化如下：
 
 ```text
-models/simple_cnn.py
+输入:      [64, 1, 28, 28]
+conv1:    [64, 16, 28, 28]
+pool1:    [64, 16, 14, 14]
+conv2:    [64, 32, 14, 14]
+pool2:    [64, 32, 7, 7]
+flatten:  [64, 1568]
+fc1:      [64, 128]
+fc2:      [64, 10]
 ```
 
-这个模型用于 MNIST 手写数字分类。输入是单通道灰度图，大小为 `28 x 28`。
+其中 `1568 = 32 x 7 x 7`，最终输出的 `10` 对应 MNIST 的 10 个数字类别。
 
-### Shape 变化
+## FGSM 原理
 
-MNIST 输入：
+FGSM 全称为 Fast Gradient Sign Method，是一种一步攻击方法。它计算分类损失对输入图片的梯度，然后沿着让损失增大的方向修改像素。
+
+公式：
 
 ```text
-x: [64, 1, 28, 28]
+x_adv = x + epsilon * sign(gradient_x J(theta, x, y))
 ```
 
-第一层卷积后：
-
-```text
-conv1: [64, 16, 28, 28]
-```
-
-原因是：
-
-```text
-in_channels = 1
-out_channels = 16
-kernel_size = 3
-padding = 1
-```
-
-所以高和宽保持为 `28 x 28`。
-
-第一次池化后：
-
-```text
-pool: [64, 16, 14, 14]
-```
-
-第二层卷积后：
-
-```text
-conv2: [64, 32, 14, 14]
-```
-
-第二次池化后：
-
-```text
-pool: [64, 32, 7, 7]
-```
-
-展平后：
-
-```text
-x.view(x.size(0), -1): [64, 1568]
-```
-
-因为：
-
-```text
-32 x 7 x 7 = 1568
-```
-
-全连接层输出：
-
-```text
-fc1: [64, 128]
-fc2: [64, 10]
-```
-
-最终输出：
-
-```text
-logits: [64, 10]
-```
-
-这里的 `10` 表示 MNIST 的 10 个类别：
-
-```text
-0, 1, 2, 3, 4, 5, 6, 7, 8, 9
-```
-
-## FGSM 攻击
-
-FGSM 代码位于：
-
-```text
-attacks/fgsm.py
-```
-
-FGSM 的核心思想是：沿着让分类 loss 变大的方向，直接修改输入图片。
-
-核心公式：
+在代码中对应：
 
 ```text
 adv_images = images + epsilon * images.grad.sign()
 ```
 
-关键步骤：
+含义：
 
-- `images.clone().detach()`：复制原图，并切断旧计算图。
-- `images.requires_grad = True`：让 PyTorch 计算 loss 对输入图片的梯度。
-- `loss.backward()`：反向传播，得到 `images.grad`。
-- `images.grad.sign()`：只取梯度方向，不关心梯度大小。
-- `torch.clamp(adv_images, 0, 1)`：保证 MNIST 像素值仍在 `[0, 1]` 范围内。
+- `x`：原始图片。
+- `y`：真实标签。
+- `theta`：模型参数。
+- `J(theta, x, y)`：分类损失。
+- `epsilon`：扰动强度。
+- `sign(...)`：取梯度符号，只保留每个像素的修改方向。
 
-`epsilon` 越大，扰动越强，攻击通常越明显，模型准确率通常越低。
+`epsilon` 越大，扰动越强，通常攻击成功率越高。
 
-## PGD 攻击
+## PGD 原理
 
-PGD 代码位于：
+PGD 可以看作多步版本的 FGSM。它先在原图附近随机初始化一个扰动点，然后多次沿梯度方向更新对抗样本，并在每一步后把扰动投影回允许范围内。
 
-```text
-attacks/pgd.py
-```
-
-PGD 可以理解为多步版本的 FGSM。它不是只走一步，而是在允许的扰动范围内反复迭代。
-
-重要参数：
-
-- `epsilon`：总扰动范围，限制对抗样本不能离原图太远。
-- `alpha`：每一步走多远。
-- `steps`：一共迭代多少步。
-
-PGD 的投影步骤：
+核心过程：
 
 ```text
-perturbation = torch.clamp(
-    adv_images - original_images,
-    min=-epsilon,
-    max=epsilon
-)
-adv_images = original_images + perturbation
+x_adv = x_adv + alpha * sign(gradient_x J(theta, x_adv, y))
+perturbation = clamp(x_adv - x, -epsilon, epsilon)
+x_adv = clamp(x + perturbation, 0, 1)
 ```
 
-这个步骤保证扰动不会超过 `epsilon`。
+关键参数：
 
-一般来说，在相同 `epsilon` 下，PGD 比 FGSM 更强。
+- `epsilon`：允许的最大总扰动范围。
+- `alpha`：每一步更新的步长。
+- `steps`：迭代次数。
+
+在相同 `epsilon` 下，PGD 通常比 FGSM 更强，因为它会进行多轮搜索。
 
 ## 评估指标
 
-评估代码位于：
+- `Clean Acc`：模型在干净测试集上的准确率，用于衡量正常分类能力。
+- `Robust Acc`：模型在对抗样本上的准确率，用于衡量攻击下仍能分类正确的比例。
+- `Attack Success Rate`：攻击成功率。本项目中按 `1 - Robust Acc` 计算。
 
-```text
-eval/metrics.py
+## 真实运行结果
+
+以下结果由项目脚本实际运行得到，使用模型权重 `simple_cnn_mnist.pth`。
+
+运行命令：
+
+```bash
+python evaluate_attack.py --attack none --model-path simple_cnn_mnist.pth
+python evaluate_attack.py --attack fgsm --epsilon 0.1 --model-path simple_cnn_mnist.pth
+python evaluate_attack.py --attack fgsm --epsilon 0.2 --model-path simple_cnn_mnist.pth
+python evaluate_attack.py --attack fgsm --epsilon 0.3 --model-path simple_cnn_mnist.pth
+python evaluate_attack.py --attack pgd --epsilon 0.3 --alpha 0.01 --steps 40 --model-path simple_cnn_mnist.pth
 ```
-
-`evaluate_clean` 计算模型在干净测试集上的准确率。
-
-`evaluate_attack` 计算三个指标：
-
-- `clean_acc`：干净测试集准确率。
-- `robust_acc`：对抗样本上的准确率。
-- `attack_success_rate`：攻击成功率，当前代码中计算方式为 `1 - robust_acc`。
-
-示例结果格式：
 
 | Model | Attack | Epsilon | Alpha | Steps | Clean Acc | Robust Acc | Attack Success Rate |
 |---|---|---:|---:|---:|---:|---:|---:|
-| SimpleCNN | None | 0 | - | - | 98.5% | - | - |
-| SimpleCNN | FGSM | 0.1 | - | 1 | 98.5% | 55.0% | 45.0% |
-| SimpleCNN | FGSM | 0.3 | - | 1 | 98.5% | 18.0% | 82.0% |
-| SimpleCNN | PGD | 0.3 | 0.01 | 40 | 98.5% | 3.0% | 97.0% |
+| SimpleCNN | None | 0 | - | - | 98.71% | - | - |
+| SimpleCNN | FGSM | 0.1 | - | 1 | 98.71% | 84.08% | 15.92% |
+| SimpleCNN | FGSM | 0.2 | - | 1 | 98.71% | 33.54% | 66.46% |
+| SimpleCNN | FGSM | 0.3 | - | 1 | 98.71% | 6.67% | 93.33% |
+| SimpleCNN | PGD | 0.3 | 0.01 | 40 | 98.71% | 0.00% | 100.00% |
 
-解释方式：
+结果说明：
 
-- `Clean Acc` 高，说明模型在正常图片上表现好。
-- FGSM 后 `Robust Acc` 下降，说明模型对一步攻击不鲁棒。
-- `epsilon` 变大后 `Robust Acc` 更低，说明扰动越大，攻击越强。
-- PGD 通常比 FGSM 的 `Robust Acc` 更低，说明 PGD 是更强的攻击。
+- 干净样本准确率为 `98.71%`，说明模型在正常 MNIST 测试集上表现较好。
+- FGSM 的 `epsilon` 从 `0.1` 增大到 `0.3` 时，`Robust Acc` 从 `84.08%` 降到 `6.67%`。
+- PGD 在 `epsilon=0.3`、`alpha=0.01`、`steps=40` 下使 `Robust Acc` 降到 `0.00%`，攻击强度明显高于 FGSM。
 
-## 可视化
+## 对抗样本可视化
 
-可视化代码位于：
+可视化脚本：
 
-```text
-utils/visualize.py
+```bash
+python visualize_attack.py --model-path simple_cnn_mnist.pth
 ```
 
-可视化会显示三张图：
+生成图片：
 
-- `Original Image`：原始图片。
-- `Perturbation`：扰动，为了方便观察会放大显示。
+```text
+results/fgsm_eps_0.3_example.png
+results/pgd_eps_0.3_example.png
+```
+
+FGSM 可视化：
+
+![FGSM adversarial example](results/fgsm_eps_0.3_example.png)
+
+PGD 可视化：
+
+![PGD adversarial example](results/pgd_eps_0.3_example.png)
+
+每张图从左到右分别为：
+
+- `Original Image`：原始 MNIST 图片。
+- `Perturbation`：放大显示后的扰动。
 - `Adversarial Image`：攻击后的图片。
-
-观察重点：
-
-- 人眼是否还能看出原来的数字。
-- 扰动是否明显。
-- 模型是否已经预测错误。
-
-对抗攻击的关键现象是：人眼看起来差不多，但模型预测变错。
 
 ## 运行方法
 
-### 1. 安装依赖
-
-```bash
-pip install torch torchvision matplotlib
-```
-
-### 2. 训练模型
+训练模型：
 
 ```bash
 python train.py --epochs 3
 ```
 
-训练完成后会生成：
-
-```text
-simple_cnn_mnist.pth
-```
-
-这是后续 FGSM 和 PGD 评估要加载的模型权重。
-
-### 3. 检查干净测试集准确率
+检查干净测试集准确率：
 
 ```bash
 python evaluate_attack.py --attack none --model-path simple_cnn_mnist.pth
 ```
 
-应该能看到类似输出：
-
-```text
-Model: SimpleCNN
-Attack: None
-Clean Acc: 98.xx%
-```
-
-### 4. 运行 FGSM 攻击检查
+运行 FGSM：
 
 ```bash
 python evaluate_attack.py --attack fgsm --epsilon 0.3 --model-path simple_cnn_mnist.pth
 ```
 
-如果想看对抗样本图片：
-
-```bash
-python evaluate_attack.py --attack fgsm --epsilon 0.3 --model-path simple_cnn_mnist.pth --visualize
-```
-
-### 5. 运行 PGD 攻击检查
+运行 PGD：
 
 ```bash
 python evaluate_attack.py --attack pgd --epsilon 0.3 --alpha 0.01 --steps 40 --model-path simple_cnn_mnist.pth
 ```
 
-如果想看 PGD 生成的对抗样本：
+生成对抗样本图片：
 
 ```bash
-python evaluate_attack.py --attack pgd --epsilon 0.3 --alpha 0.01 --steps 40 --model-path simple_cnn_mnist.pth --visualize
+python visualize_attack.py --model-path simple_cnn_mnist.pth
 ```
 
-## 建议顺序
+## 后续优化方向
 
-先训练模型：
-
-```bash
-python train.py --epochs 3
-```
-
-然后测试干净准确率：
-
-```bash
-python evaluate_attack.py --attack none
-```
-
-再测试 FGSM：
-
-```bash
-python evaluate_attack.py --attack fgsm --epsilon 0.1
-python evaluate_attack.py --attack fgsm --epsilon 0.3
-```
-
-最后测试 PGD：
-
-```bash
-python evaluate_attack.py --attack pgd --epsilon 0.3 --alpha 0.01 --steps 40
-```
-
-正常情况下，你会看到：
-
-```text
-Clean Acc 较高
-FGSM Robust Acc 明显下降
-PGD Robust Acc 通常比 FGSM 更低
-Attack Success Rate 上升
-```
+- 使用 CIFAR-10 数据集进行彩色图像分类与攻击评估。
+- 替换 SimpleCNN 为 ResNet，提高模型表达能力。
+- 加入对抗训练，提升模型鲁棒性。
+- 系统比较 FGSM 与 PGD 在不同参数下的攻击效果。
+- 增加更严格的鲁棒性评估方式，例如只统计原本干净样本预测正确的样本。
